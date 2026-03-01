@@ -280,3 +280,11 @@ class MarketStore:
             (keywords, chat_id),
         )
         await self._db.commit()
+
+    async def clear_markets(self) -> None:
+        """Delete all market data and seen records (for clean re-seed)."""
+        assert self._db
+        await self._db.execute("DELETE FROM markets")
+        await self._db.execute("DELETE FROM seen_markets")
+        await self._db.execute("DELETE FROM poll_state")
+        await self._db.commit()

@@ -66,9 +66,9 @@
       <div class="market-card" data-platform="{{ m.platform }}" data-title="{{ m.title|lower }}">
         <div class="card-header">
           <span class="platform-badge {{ 'badge-kalshi' if m.platform == 'kalshi' else 'badge-polymarket' }}">
-            {{ '🔷' if m.platform == 'kalshi' else '🟣' }} {{ m.platform }}
+            {{ '🔷' if m.platform == 'kalshi' else '🟣' }} {{ m.platform|upper }}
           </span>
-          <span class="card-time" title="{{ m.detected_at }}">{{ m.detected_at[:16] }}</span>
+          <span class="card-time" data-ts="{{ m.detected_at }}"></span>
         </div>
 
         <div class="card-title">
@@ -84,10 +84,10 @@
         {% endif %}
 
         <div class="card-meta">
-          {% if m.yes_price is not none %}
+          {% if m.yes_price is not none and m.yes_price > 0 %}
           <div class="meta-item">
             💰 <span class="price-yes">Y {{ "%.0f"|format(m.yes_price * 100) }}¢</span>
-            {% if m.no_price is not none %}
+            {% if m.no_price is not none and m.no_price > 0 %}
             / <span class="price-no">N {{ "%.0f"|format(m.no_price * 100) }}¢</span>
             {% endif %}
           </div>
@@ -104,7 +104,7 @@
           {% endif %}
 
           {% if m.url %}
-          <a href="{{ m.url }}" target="_blank" rel="noopener" style="margin-left: auto;">View →</a>
+          <a href="{{ m.url }}" target="_blank" rel="noopener" class="view-link">View →</a>
           {% endif %}
         </div>
       </div>
@@ -136,6 +136,34 @@
     let currentFilter = 'all';
     let currentSearch = '';
     let currentPage = 1;
+
+    // ── Format all timestamps on page load ──
+    function formatDates() {
+      document.querySelectorAll('.card-time[data-ts]').forEach(el => {
+        const raw = el.dataset.ts;
+        if (!raw || el.textContent.trim()) return;
+        try {
+          const d = new Date(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z');
+          el.textContent = d.toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+          });
+          el.title = d.toLocaleString();
+        } catch(e) {
+          el.textContent = raw.slice(0, 16);
+        }
+      });
+    }
+    formatDates();
+
+    function fmtDate(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+        return d.toLocaleString(undefined, {
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+        });
+      } catch(e) { return iso.slice(0, 16); }
+    }
 
     function filterMarkets(platform, btn) {
       currentFilter = platform;
@@ -171,6 +199,7 @@
           data.markets.forEach(m => {
             grid.insertAdjacentHTML('beforeend', renderCard(m));
           });
+          formatDates();
           if (!data.has_more) {
             document.querySelector('.load-more')?.remove();
           }
@@ -180,26 +209,27 @@
     function renderCard(m) {
       const badge = m.platform === 'kalshi' ? 'badge-kalshi' : 'badge-polymarket';
       const emoji = m.platform === 'kalshi' ? '🔷' : '🟣';
+      const pname = m.platform.toUpperCase();
       const titleLink = m.url
         ? `<a href="${m.url}" target="_blank" rel="noopener">${esc(m.title)}</a>`
         : esc(m.title);
 
       let meta = '';
-      if (m.yes_price != null) {
+      if (m.yes_price != null && m.yes_price > 0) {
         meta += `<div class="meta-item">💰 <span class="price-yes">Y ${Math.round(m.yes_price*100)}¢</span>`;
-        if (m.no_price != null) meta += ` / <span class="price-no">N ${Math.round(m.no_price*100)}¢</span>`;
+        if (m.no_price != null && m.no_price > 0) meta += ` / <span class="price-no">N ${Math.round(m.no_price*100)}¢</span>`;
         meta += `</div>`;
       }
       if (m.volume != null && m.volume > 0) {
         meta += `<div class="meta-item">📊 ${m.volume.toLocaleString()}</div>`;
       }
       if (m.category) meta += `<span class="category-tag">${esc(m.category)}</span>`;
-      if (m.url) meta += `<a href="${m.url}" target="_blank" rel="noopener" style="margin-left:auto;">View →</a>`;
+      if (m.url) meta += `<a href="${m.url}" target="_blank" rel="noopener" class="view-link">View →</a>`;
 
       return `<div class="market-card" data-platform="${m.platform}" data-title="${esc(m.title).toLowerCase()}">
         <div class="card-header">
-          <span class="platform-badge ${badge}">${emoji} ${m.platform}</span>
-          <span class="card-time">${(m.detected_at||'').slice(0,16)}</span>
+          <span class="platform-badge ${badge}">${emoji} ${pname}</span>
+          <span class="card-time" data-ts="${m.detected_at||''}">${fmtDate(m.detected_at)}</span>
         </div>
         <div class="card-title">${titleLink}</div>
         ${m.subtitle ? `<div class="card-subtitle">${esc(m.subtitle)}</div>` : ''}
@@ -213,7 +243,7 @@
       return d.innerHTML;
     }
 
-    // Auto-refresh every 10 seconds
+    // Auto-refresh every 10 seconds — update stats + prepend new cards
     setInterval(async () => {
       try {
         const r = await fetch('/api/stats');
@@ -224,9 +254,22 @@
       } catch(e) {}
 
       try {
-        const r = await fetch('/api/markets?limit=10');
+        const r = await fetch('/api/markets?limit=20');
         const data = await r.json();
-        // Could add new cards at top — for now just refresh stats
+        const grid = document.getElementById('market-grid');
+        const existing = new Set();
+        grid.querySelectorAll('.market-card').forEach(c => {
+          existing.add(c.dataset.platform + ':' + c.dataset.title);
+        });
+        let added = 0;
+        data.markets.reverse().forEach(m => {
+          const key = m.platform + ':' + (m.title||'').toLowerCase();
+          if (!existing.has(key)) {
+            grid.insertAdjacentHTML('afterbegin', renderCard(m));
+            added++;
+          }
+        });
+        if (added > 0) formatDates();
       } catch(e) {}
     }, 10000);
   </script>

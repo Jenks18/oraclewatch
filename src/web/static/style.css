@@ -355,6 +355,18 @@ a:hover { text-decoration: underline; }
   color: var(--text-muted);
 }
 
+.view-link {
+  margin-left: auto;
+  color: var(--accent-cyan);
+  text-decoration: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.view-link:hover {
+  text-decoration: underline;
+}
+}
+
 /* ── Load More ────────────────────────────────────── */
 
 .load-more {

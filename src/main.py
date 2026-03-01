@@ -129,8 +129,9 @@ class OracleWatch:
             info_parts.append("Telegram: [bold]@{}[/bold]".format(self._telegram_bot_username))
         console.print("  " + " | ".join(info_parts) + "\n", style="dim")
 
-        # Seed pass
-        logger.info("Running initial market scan (seeding database)...")
+        # Seed pass — clear stale data and re-index
+        logger.info("Clearing stale data and running fresh market scan...")
+        await self._store.clear_markets()
         await self._seed_pass()
         total = await self._store.seen_count()
         logger.info("Seed complete — %d markets indexed. Starting live monitoring...", total)
