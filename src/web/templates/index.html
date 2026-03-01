@@ -68,7 +68,7 @@
           <span class="platform-badge {{ 'badge-kalshi' if m.platform == 'kalshi' else 'badge-polymarket' }}">
             {{ '🔷' if m.platform == 'kalshi' else '🟣' }} {{ m.platform|upper }}
           </span>
-          <span class="card-time" data-ts="{{ m.detected_at }}"></span>
+          <span class="card-time" data-ts="{{ m.created_at or m.detected_at }}"></span>
         </div>
 
         <div class="card-title">

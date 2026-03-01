@@ -201,12 +201,12 @@ class MarketStore:
         assert self._db
         if platform:
             cursor = await self._db.execute(
-                "SELECT * FROM markets WHERE platform = ? ORDER BY detected_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM markets WHERE platform = ? ORDER BY COALESCE(created_at, detected_at) DESC LIMIT ? OFFSET ?",
                 (platform, limit, offset),
             )
         else:
             cursor = await self._db.execute(
-                "SELECT * FROM markets ORDER BY detected_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM markets ORDER BY COALESCE(created_at, detected_at) DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             )
         columns = [desc[0] for desc in cursor.description]

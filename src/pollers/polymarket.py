@@ -45,7 +45,7 @@ class PolymarketPoller(BasePoller):
                 params={
                     "limit": 100,
                     "active": "true",
-                    "order": "startDate",
+                    "order": "createdAt",
                     "ascending": "false",
                 },
             )
@@ -141,11 +141,17 @@ class PolymarketPoller(BasePoller):
                 except (ValueError, TypeError):
                     pass
 
-            # Category from tags
+            # Category from tags — tags can be strings or dicts with 'label'
             category = ""
             tags = raw.get("tags", [])
             if tags and isinstance(tags, list):
-                category = tags[0] if isinstance(tags[0], str) else str(tags[0])
+                first_tag = tags[0]
+                if isinstance(first_tag, str):
+                    category = first_tag
+                elif isinstance(first_tag, dict):
+                    category = first_tag.get("label", "")
+                else:
+                    category = ""
 
             active = raw.get("active", True)
             status = MarketStatus.OPEN if active else MarketStatus.CLOSED
