@@ -36,7 +36,7 @@ class KalshiPoller(BasePoller):
         self,
         store: MarketStore,
         http_client: httpx.AsyncClient,
-        base_url: str = "https://api.elections.kalshi.com/trade-api/v2",
+        base_url: str = "https://trading-api.kalshi.com/trade-api/v2",
         lookback_seconds: int = 300,
     ) -> None:
         super().__init__(store, http_client)
@@ -156,7 +156,7 @@ class KalshiPoller(BasePoller):
                 market_id=ticker,
                 title=title,
                 subtitle=subtitle,
-                url=f"https://kalshi.com/markets/{event_ticker}",
+                url=f"https://kalshi.com/markets/{event_ticker}/{ticker}" if ticker else f"https://kalshi.com/markets/{event_ticker}",
                 status=status,
                 created_at=created_time,
                 close_time=close_time,

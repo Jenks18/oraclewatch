@@ -28,7 +28,7 @@ class Config:
 
     # Kalshi
     kalshi_enabled: bool = True
-    kalshi_api_base_url: str = "https://api.elections.kalshi.com/trade-api/v2"
+    kalshi_api_base_url: str = "https://trading-api.kalshi.com/trade-api/v2"
 
     # Polymarket
     polymarket_enabled: bool = True
@@ -64,7 +64,7 @@ class Config:
             kalshi_enabled=_bool(os.getenv("KALSHI_ENABLED", "true")),
             kalshi_api_base_url=os.getenv(
                 "KALSHI_API_BASE_URL",
-                "https://api.elections.kalshi.com/trade-api/v2",
+                "https://trading-api.kalshi.com/trade-api/v2",
             ),
             polymarket_enabled=_bool(os.getenv("POLYMARKET_ENABLED", "true")),
             polymarket_gamma_api_url=os.getenv(

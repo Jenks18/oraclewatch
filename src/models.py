@@ -62,5 +62,5 @@ class NewMarket(BaseModel):
         if self.url:
             return self.url
         if self.platform == Platform.KALSHI:
-            return f"https://kalshi.com/markets/{self.event_ticker}"
+            return f"https://kalshi.com/markets/{self.event_ticker}/{self.market_id}" if self.market_id else f"https://kalshi.com/markets/{self.event_ticker}"
         return ""
