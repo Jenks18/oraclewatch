@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  oraclewatch:
+    build: .
+    container_name: oraclewatch
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/oraclewatch.db

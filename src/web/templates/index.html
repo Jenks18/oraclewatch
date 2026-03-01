@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OracleWatch — Prediction Market Monitor</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <span class="logo-icon">🔮</span>
+      <span class="logo-text">OracleWatch</span>
+    </div>
+    <div class="header-stats">
+      <div class="stat-pill">
+        <span class="pulse"></span>
+        <span>Live</span>
+      </div>
+      <div class="stat-pill">
+        🔷 Kalshi: <span class="num" id="kalshi-count">{{ kalshi_count }}</span>
+      </div>
+      <div class="stat-pill">
+        🟣 Poly: <span class="num" id="poly-count">{{ poly_count }}</span>
+      </div>
+      <div class="stat-pill">
+        👥 <span class="num" id="sub-count">{{ subscriber_count }}</span> subscribers
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Telegram CTA -->
+    {% if telegram_bot_username %}
+    <div class="tg-cta">
+      <div class="tg-cta-text">
+        <span>📲</span>
+        <div>
+          <p><strong>Get instant alerts on Telegram</strong></p>
+          <p>New markets pushed to your phone the second they go live. Just tap Start.</p>
+        </div>
+      </div>
+      <a href="https://t.me/{{ telegram_bot_username }}" target="_blank" class="tg-btn">
+        ✈️ Open @{{ telegram_bot_username }}
+      </a>
+    </div>
+    {% endif %}
+
+    <!-- Filters -->
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all" onclick="filterMarkets('all', this)">All Markets</button>
+      <button class="filter-btn" data-filter="kalshi" onclick="filterMarkets('kalshi', this)">🔷 Kalshi</button>
+      <button class="filter-btn" data-filter="polymarket" onclick="filterMarkets('polymarket', this)">🟣 Polymarket</button>
+      <input type="text" class="search-box" id="search" placeholder="🔍 Search markets..." oninput="searchMarkets(this.value)">
+    </div>
+
+    <!-- Market Grid -->
+    <div class="market-grid" id="market-grid">
+      {% for m in markets %}
+      <div class="market-card" data-platform="{{ m.platform }}" data-title="{{ m.title|lower }}">
+        <div class="card-header">
+          <span class="platform-badge {{ 'badge-kalshi' if m.platform == 'kalshi' else 'badge-polymarket' }}">
+            {{ '🔷' if m.platform == 'kalshi' else '🟣' }} {{ m.platform }}
+          </span>
+          <span class="card-time" title="{{ m.detected_at }}">{{ m.detected_at[:16] }}</span>
+        </div>
+
+        <div class="card-title">
+          {% if m.url %}
+            <a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a>
+          {% else %}
+            {{ m.title }}
+          {% endif %}
+        </div>
+
+        {% if m.subtitle %}
+        <div class="card-subtitle">{{ m.subtitle }}</div>
+        {% endif %}
+
+        <div class="card-meta">
+          {% if m.yes_price is not none %}
+          <div class="meta-item">
+            💰 <span class="price-yes">Y {{ "%.0f"|format(m.yes_price * 100) }}¢</span>
+            {% if m.no_price is not none %}
+            / <span class="price-no">N {{ "%.0f"|format(m.no_price * 100) }}¢</span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if m.volume is not none and m.volume > 0 %}
+          <div class="meta-item">
+            📊 {{ "{:,.0f}".format(m.volume) }}
+          </div>
+          {% endif %}
+
+          {% if m.category %}
+          <span class="category-tag">{{ m.category }}</span>
+          {% endif %}
+
+          {% if m.url %}
+          <a href="{{ m.url }}" target="_blank" rel="noopener" style="margin-left: auto;">View →</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if not markets %}
+      <div class="empty-state" style="grid-column: 1 / -1;">
+        <div class="icon">🔮</div>
+        <p>No markets detected yet. The poller is warming up...</p>
+        <p style="margin-top: 0.5rem; font-size: 0.85rem;">Markets will appear here as they're discovered.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Load More -->
+    {% if has_more %}
+    <div class="load-more">
+      <button class="load-more-btn" onclick="loadMore()">Load More Markets</button>
+    </div>
+    {% endif %}
+
+  </main>
+
+  <footer class="footer">
+    OracleWatch — Real-time prediction market monitor &middot; Kalshi &middot; Polymarket
+  </footer>
+
+  <script>
+    let currentFilter = 'all';
+    let currentSearch = '';
+    let currentPage = 1;
+
+    function filterMarkets(platform, btn) {
+      currentFilter = platform;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active', 'poly'));
+      btn.classList.add('active');
+      if (platform === 'polymarket') btn.classList.add('poly');
+      applyFilters();
+    }
+
+    function searchMarkets(query) {
+      currentSearch = query.toLowerCase();
+      applyFilters();
+    }
+
+    function applyFilters() {
+      document.querySelectorAll('.market-card').forEach(card => {
+        const platform = card.dataset.platform;
+        const title = card.dataset.title;
+        const matchPlatform = currentFilter === 'all' || platform === currentFilter;
+        const matchSearch = !currentSearch || title.includes(currentSearch);
+        card.style.display = (matchPlatform && matchSearch) ? '' : 'none';
+      });
+    }
+
+    function loadMore() {
+      currentPage++;
+      const params = new URLSearchParams({page: currentPage});
+      if (currentFilter !== 'all') params.set('platform', currentFilter);
+      fetch('/api/markets?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+          const grid = document.getElementById('market-grid');
+          data.markets.forEach(m => {
+            grid.insertAdjacentHTML('beforeend', renderCard(m));
+          });
+          if (!data.has_more) {
+            document.querySelector('.load-more')?.remove();
+          }
+        });
+    }
+
+    function renderCard(m) {
+      const badge = m.platform === 'kalshi' ? 'badge-kalshi' : 'badge-polymarket';
+      const emoji = m.platform === 'kalshi' ? '🔷' : '🟣';
+      const titleLink = m.url
+        ? `<a href="${m.url}" target="_blank" rel="noopener">${esc(m.title)}</a>`
+        : esc(m.title);
+
+      let meta = '';
+      if (m.yes_price != null) {
+        meta += `<div class="meta-item">💰 <span class="price-yes">Y ${Math.round(m.yes_price*100)}¢</span>`;
+        if (m.no_price != null) meta += ` / <span class="price-no">N ${Math.round(m.no_price*100)}¢</span>`;
+        meta += `</div>`;
+      }
+      if (m.volume != null && m.volume > 0) {
+        meta += `<div class="meta-item">📊 ${m.volume.toLocaleString()}</div>`;
+      }
+      if (m.category) meta += `<span class="category-tag">${esc(m.category)}</span>`;
+      if (m.url) meta += `<a href="${m.url}" target="_blank" rel="noopener" style="margin-left:auto;">View →</a>`;
+
+      return `<div class="market-card" data-platform="${m.platform}" data-title="${esc(m.title).toLowerCase()}">
+        <div class="card-header">
+          <span class="platform-badge ${badge}">${emoji} ${m.platform}</span>
+          <span class="card-time">${(m.detected_at||'').slice(0,16)}</span>
+        </div>
+        <div class="card-title">${titleLink}</div>
+        ${m.subtitle ? `<div class="card-subtitle">${esc(m.subtitle)}</div>` : ''}
+        <div class="card-meta">${meta}</div>
+      </div>`;
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    // Auto-refresh every 10 seconds
+    setInterval(async () => {
+      try {
+        const r = await fetch('/api/stats');
+        const s = await r.json();
+        document.getElementById('kalshi-count').textContent = s.kalshi_count;
+        document.getElementById('poly-count').textContent = s.poly_count;
+        document.getElementById('sub-count').textContent = s.subscriber_count;
+      } catch(e) {}
+
+      try {
+        const r = await fetch('/api/markets?limit=10');
+        const data = await r.json();
+        // Could add new cards at top — for now just refresh stats
+      } catch(e) {}
+    }, 10000);
+  </script>
+
+</body>
+</html>
