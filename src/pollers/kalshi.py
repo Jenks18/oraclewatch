@@ -38,7 +38,7 @@ class KalshiPoller(BasePoller):
         self,
         store: MarketStore,
         http_client: httpx.AsyncClient,
-        base_url: str = "https://trading-api.kalshi.com/trade-api/v2",
+        base_url: str = "https://api.elections.kalshi.com/trade-api/v2",
         lookback_seconds: int = 300,
     ) -> None:
         super().__init__(store, http_client)
@@ -56,6 +56,7 @@ class KalshiPoller(BasePoller):
             params = {
                 "limit": 200,
                 "status": "open",
+                "with_nested_markets": "true",
             }  # type: Dict[str, object]
             if cursor:
                 params["cursor"] = cursor
