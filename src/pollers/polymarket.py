@@ -1,13 +1,16 @@
-"""Polymarket market poller.
+"""Polymarket event poller.
 
-Uses the Gamma API (no auth required) to discover new events and markets.
+Uses the Gamma API (no auth required) to discover new prediction market events.
+Fetches event-level data (not individual sub-market contracts).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
+from typing import List, Optional
 
 import httpx
 
@@ -33,140 +36,112 @@ class PolymarketPoller(BasePoller):
         self._lookback_seconds = lookback_seconds
 
     async def fetch_recent_markets(self) -> list[NewMarket]:
-        """Fetch recent markets from the Polymarket Gamma API."""
-        # Polymarket Gamma API supports ordering and pagination
-        markets: list[NewMarket] = []
+        """Fetch recent events from the Polymarket Gamma API."""
+        events = []  # type: List[NewMarket]
 
-        # Fetch recent events (which contain markets)
         try:
-            event_markets = await self._fetch_from_events()
-            markets.extend(event_markets)
+            resp = await self._http.get(
+                "{}/events".format(self._gamma_url),
+                params={
+                    "limit": 100,
+                    "active": "true",
+                    "order": "startDate",
+                    "ascending": "false",
+                },
+            )
+            resp.raise_for_status()
+            raw_events = resp.json()
+
+            for ev in raw_events:
+                parsed = self._parse_event(ev)
+                if parsed:
+                    events.append(parsed)
         except Exception as exc:
             logger.warning("[polymarket] Event fetch failed: %s", exc)
 
-        # Also fetch markets directly for completeness
-        try:
-            direct_markets = await self._fetch_direct_markets()
-            markets.extend(direct_markets)
-        except Exception as exc:
-            logger.warning("[polymarket] Direct market fetch failed: %s", exc)
-
-        # Deduplicate by market_id
-        seen_ids: set[str] = set()
-        unique: list[NewMarket] = []
-        for m in markets:
-            if m.market_id not in seen_ids:
-                seen_ids.add(m.market_id)
-                unique.append(m)
-
         await self._store.set_last_poll_ts(Platform.POLYMARKET, int(time.time()))
-        logger.debug("[polymarket] Fetched %d unique market(s)", len(unique))
-        return unique
+        logger.debug("[polymarket] Fetched %d event(s)", len(events))
+        return events
 
-    async def _fetch_from_events(self) -> list[NewMarket]:
-        """Fetch markets via the /events endpoint (gives event context)."""
-        params = {
-            "limit": 50,
-            "active": "true",
-            "order": "startDate",
-            "ascending": "false",
-        }
-        resp = await self._http.get(f"{self._gamma_url}/events", params=params)
-        resp.raise_for_status()
-        events = resp.json()
-
-        markets: list[NewMarket] = []
-        for event in events:
-            event_markets = event.get("markets", [])
-            for m in event_markets:
-                parsed = self._parse_market(m, event_title=event.get("title", ""))
-                if parsed:
-                    markets.append(parsed)
-        return markets
-
-    async def _fetch_direct_markets(self) -> list[NewMarket]:
-        """Fetch markets directly from the /markets endpoint."""
-        params = {
-            "limit": 100,
-            "active": "true",
-            "order": "createdAt",
-            "ascending": "false",
-        }
-        resp = await self._http.get(f"{self._gamma_url}/markets", params=params)
-        resp.raise_for_status()
-        raw_markets = resp.json()
-
-        markets: list[NewMarket] = []
-        for m in raw_markets:
-            parsed = self._parse_market(m)
-            if parsed:
-                markets.append(parsed)
-        return markets
-
-    def _parse_market(self, raw: dict, event_title: str = ""):
-        """Parse a Polymarket Gamma API market into our NewMarket model."""
+    def _parse_event(self, raw: dict) -> Optional[NewMarket]:
+        """Parse a Polymarket event into a single NewMarket entry."""
         try:
-            market_id = str(raw.get("id", raw.get("conditionId", "")))
-            if not market_id:
+            event_id = str(raw.get("id", ""))
+            if not event_id:
                 return None
 
-            question = raw.get("question", raw.get("title", "Unknown Market"))
-            title = f"{event_title}: {question}" if event_title and event_title != question else question
+            title = raw.get("title", "Unknown Event")
+            slug = raw.get("slug", "")
+            url = "https://polymarket.com/event/{}".format(slug) if slug else ""
 
-            # Parse outcomes and prices
-            outcomes: list[str] = []
-            outcome_prices: list[float] = []
-            try:
-                import json
-                raw_outcomes = raw.get("outcomes", "[]")
-                if isinstance(raw_outcomes, str):
-                    outcomes = json.loads(raw_outcomes)
-                elif isinstance(raw_outcomes, list):
-                    outcomes = raw_outcomes
+            # Aggregate data from sub-markets
+            sub_markets = raw.get("markets", [])
+            market_count = len(sub_markets)
+            subtitle = ""
+            if market_count > 1:
+                subtitle = "{} contract{}".format(market_count, "s" if market_count != 1 else "")
 
-                raw_prices = raw.get("outcomePrices", "[]")
-                if isinstance(raw_prices, str):
-                    outcome_prices = [float(p) for p in json.loads(raw_prices)]
-                elif isinstance(raw_prices, list):
-                    outcome_prices = [float(p) for p in raw_prices]
-            except (json.JSONDecodeError, ValueError, TypeError):
-                pass
+            # Get representative price from first active sub-market
+            yes_price = None
+            no_price = None
+            total_volume = 0.0
+            outcomes = []  # type: List[str]
+            outcome_prices = []  # type: List[float]
 
-            yes_price = outcome_prices[0] if len(outcome_prices) > 0 else None
-            no_price = outcome_prices[1] if len(outcome_prices) > 1 else None
+            for sm in sub_markets:
+                # Accumulate volume
+                vol = sm.get("volume")
+                if vol is not None:
+                    try:
+                        total_volume += float(vol)
+                    except (ValueError, TypeError):
+                        pass
 
-            # Parse timestamps
+            # Use first sub-market for representative pricing
+            if sub_markets:
+                first = sub_markets[0]
+                try:
+                    raw_outcomes = first.get("outcomes", "[]")
+                    if isinstance(raw_outcomes, str):
+                        outcomes = json.loads(raw_outcomes)
+                    elif isinstance(raw_outcomes, list):
+                        outcomes = raw_outcomes
+
+                    raw_prices = first.get("outcomePrices", "[]")
+                    if isinstance(raw_prices, str):
+                        outcome_prices = [float(p) for p in json.loads(raw_prices)]
+                    elif isinstance(raw_prices, list):
+                        outcome_prices = [float(p) for p in raw_prices]
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+
+                yes_price = outcome_prices[0] if len(outcome_prices) > 0 else None
+                no_price = outcome_prices[1] if len(outcome_prices) > 1 else None
+
+            volume = total_volume if total_volume > 0 else None
+
+            # Timestamps
             created_at = None
-            if raw.get("createdAt"):
+            created_str = raw.get("startDate", raw.get("createdAt"))
+            if created_str:
                 try:
                     created_at = datetime.fromisoformat(
-                        str(raw["createdAt"]).replace("Z", "+00:00")
+                        str(created_str).replace("Z", "+00:00")
                     )
                 except (ValueError, TypeError):
                     pass
 
             close_time = None
-            if raw.get("endDate"):
+            end_str = raw.get("endDate")
+            if end_str:
                 try:
                     close_time = datetime.fromisoformat(
-                        str(raw["endDate"]).replace("Z", "+00:00")
+                        str(end_str).replace("Z", "+00:00")
                     )
                 except (ValueError, TypeError):
                     pass
 
-            # Volume
-            volume = None
-            if raw.get("volume") is not None:
-                try:
-                    volume = float(raw["volume"])
-                except (ValueError, TypeError):
-                    pass
-
-            # Market URL
-            slug = raw.get("slug", "")
-            url = f"https://polymarket.com/event/{slug}" if slug else ""
-
-            # Category / tags
+            # Category from tags
             category = ""
             tags = raw.get("tags", [])
             if tags and isinstance(tags, list):
@@ -177,8 +152,9 @@ class PolymarketPoller(BasePoller):
 
             return NewMarket(
                 platform=Platform.POLYMARKET,
-                market_id=market_id,
+                market_id=event_id,
                 title=title,
+                subtitle=subtitle,
                 url=url,
                 status=status,
                 created_at=created_at,
@@ -191,5 +167,5 @@ class PolymarketPoller(BasePoller):
                 outcome_prices=outcome_prices,
             )
         except Exception as exc:
-            logger.warning("[polymarket] Failed to parse market: %s", exc)
+            logger.warning("[polymarket] Failed to parse event: %s", exc)
             return None
